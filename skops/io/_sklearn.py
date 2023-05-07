@@ -99,6 +99,7 @@ class ReduceNode(Node):
         constructor: Type[Any],
         trusted: bool | Sequence[str] = False,
     ) -> None:
+        breakpoint()
         super().__init__(state, load_context, trusted)
         reduce = state["__reduce__"]
         self.children = {
@@ -112,24 +113,27 @@ class ReduceNode(Node):
         constructor = self.children["constructor"]
         instance = constructor(*args)
         attrs = self.children["attrs"].construct()
+        breakpoint()
         if not attrs:
             # nothing more to do
             return instance
-
         if isinstance(args, tuple) and not hasattr(instance, "__setstate__"):
             raise UnsupportedTypeException(
                 f"Objects of type {constructor} are not supported yet"
             )
 
         if hasattr(instance, "__setstate__"):
+            # breakpoint()
             instance.__setstate__(attrs)
         elif isinstance(attrs, dict):
+            # breakpoint()
             instance.__dict__.update(attrs)
         else:
             # we (probably) got tuple attrs but cannot setstate with them
             raise UnsupportedTypeException(
                 f"Objects of type {constructor} are not supported yet"
             )
+        # breakpoint()
 
         return instance
 
@@ -165,6 +169,7 @@ class SGDNode(ReduceNode):
         trusted: bool | Sequence[str] = False,
     ) -> None:
         # TODO: make sure trusted here makes sense and used.
+        breakpoint()
         super().__init__(
             state,
             load_context,

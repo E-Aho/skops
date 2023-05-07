@@ -4,7 +4,9 @@ import io
 import json
 import operator
 import sys
+import tempfile
 import warnings
+import zipfile
 from collections import Counter
 from functools import partial, wraps
 from pathlib import Path
@@ -13,6 +15,7 @@ from zipfile import ZipFile
 import joblib
 import numpy as np
 import pytest
+import sklearn.tree
 from scipy import sparse, special
 from sklearn.base import BaseEstimator, is_regressor
 from sklearn.compose import ColumnTransformer
@@ -1002,3 +1005,89 @@ def test_persist_function(func):
     # check that loaded estimator is identical
     assert_params_equal(estimator.__dict__, loaded.__dict__)
     assert_method_outputs_equal(estimator, loaded, X)
+
+
+class TestSkopsSafety:
+    def get_tree_estimator(self):
+        estimator = sklearn.linear_model.SGDClassifier(loss="squared_error")
+        # Create arbitrary X, y values to generate tree structure
+        X = [[x, np.sin(x)] for x in range(10)]
+        y = [x[0] % 3 for x in X]
+        estimator.fit(X, y)
+        return estimator
+
+    def mutate_schema(self, schema: dict, target_attrs=None, target_args=None) -> dict:
+        if target_attrs:
+            with ZipFile(io.BytesIO(), "w") as zip_file:
+                save_context = SaveContext(zip_file=zip_file)
+                attr_schema = get_state(target_attrs, save_context)
+
+            # overwrite part of tree to an arbitrary different object
+            # that does not conform to expected schema
+            schema["content"]["content"]["loss_function_"]["content"] = attr_schema
+            schema["content"]["content"]["loss_function_"]["__module__"] = attr_schema[
+                "__module__"
+            ]
+            schema["content"]["content"]["loss_function_"]["__class__"] = attr_schema[
+                "__class__"
+            ]
+
+        if target_args:
+            with ZipFile(io.BytesIO(), "w") as zip_file:
+                save_context = SaveContext(zip_file=zip_file)
+                arg_schema = get_state(target_args, save_context)
+                schema["content"]["content"]["loss_function_"]["__reduce__"][
+                    "args"
+                ] = arg_schema
+        breakpoint()
+        return schema
+
+    def get_mutated_estimator(self, target_attrs=None, target_args=None):
+        # check
+        tempdir = tempfile.mkdtemp()
+        estimator = self.get_tree_estimator()
+
+        init_path = tempdir + "initial_path.zip"
+        out_path = tempdir + "final_path.zip"
+        with open(init_path, "wb+") as file:
+            dump(estimator, file)
+
+        # To adjust input
+        with zipfile.ZipFile(init_path, "r") as z_in:
+            with zipfile.ZipFile(out_path, "w") as z_out:
+                z_out.comment = z_in.comment
+
+                # write all non-schema files to output zip
+                for item in z_in.filelist:
+                    if item.filename != "schema.json":
+                        z_out.writestr(item.filename, z_in.read(item.filename))
+
+                # mutate schema and write to new archive
+                new_schema = self.mutate_schema(
+                    json.loads(z_in.read("schema.json").decode("utf-8")),
+                    target_args=target_args,
+                    target_attrs=target_attrs,
+                )
+
+                z_out.writestr("schema.json", json.dumps(new_schema))
+
+        return out_path
+
+    @pytest.mark.parametrize(
+        "mutated_attrs",
+        [
+            ((1, 2, 3, 4)),
+            "a string",
+        ],
+        ids=[
+            "Tuple",
+            "String",
+        ],
+    )
+    def test_given_unexpected_args_in_tree_raises_exception(self, mutated_attrs):
+        mutated_args = [1, 2]
+        dumped_estimator_path = self.get_mutated_estimator(
+            target_attrs=mutated_attrs, target_args=mutated_args
+        )
+        with pytest.raises(UnsupportedTypeException):
+            load(dumped_estimator_path, trusted=True)

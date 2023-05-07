@@ -59,10 +59,12 @@ def audit_tree(tree: Node) -> None:
     UntrustedTypesFoundException
         If the tree contains an untrusted type.
     """
+    # breakpoint()
     if tree.trusted is True:
         return
 
     unsafe = tree.get_unsafe_set()
+    # breakpoint()
     if unsafe:
         raise UntrustedTypesFoundException(unsafe)
 
@@ -377,4 +379,5 @@ def get_tree(
             )
 
     loaded_tree = node_cls(state, load_context, trusted=trusted)
+    # breakpoint()
     return loaded_tree
