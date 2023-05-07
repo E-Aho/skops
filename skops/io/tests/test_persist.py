@@ -1039,7 +1039,6 @@ class TestSkopsSafety:
                 schema["content"]["content"]["loss_function_"]["__reduce__"][
                     "args"
                 ] = arg_schema
-        breakpoint()
         return schema
 
     def get_mutated_estimator(self, target_attrs=None, target_args=None):
